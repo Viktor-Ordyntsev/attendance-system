@@ -116,8 +116,15 @@ class FaceMatcher:
         query = np.asarray(embedding, dtype=np.float32)
         
         norm = np.linalg.norm(query)
-        if norm == 0:
-            return MatchResult(...)
+        if not np.isfinite(query).all():
+            return MatchResult(
+                participant_id=None,
+                label="unknown",
+                score=0.0,
+                is_match=False,
+                top_candidates=[],
+                reason="non_finite_query_embedding",
+            )
 
         query = query / norm
 
