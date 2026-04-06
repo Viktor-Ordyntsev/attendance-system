@@ -49,6 +49,12 @@ class FaceMatcher:
         for person in reference_db:
             embedding = np.asarray(person["embedding"], dtype=np.float32)
 
+            norm = np.linalg.norm(embedding)
+            if norm == 0:
+                continue
+
+            embedding = embedding / norm
+
             if embedding.ndim != 1:
                 raise ValueError(
                     f"Embedding for participant {person['participant_id']} must be 1D"
@@ -67,21 +73,14 @@ class FaceMatcher:
     @staticmethod
     def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
         """
-        Считает cosine similarity между двумя векторами.
+        Считает косинусное сходство между двумя векторами.
 
         Формула:
             sim(a, b) = (a · b) / (||a|| * ||b||)
 
         Чем ближе к 1.0, тем вектора более похожи.
         """
-        a_norm = np.linalg.norm(a)
-        b_norm = np.linalg.norm(b)
-
-        if a_norm == 0.0 or b_norm == 0.0:
-            return -1.0
-
-        return float(np.dot(a, b) / (a_norm * b_norm))
-
+        return float(np.dot(a, b)) 
     def _build_candidates(self, query_embedding: np.ndarray) -> list[CandidateMatch]:
         """
         Для query embedding строит список кандидатов:
@@ -115,6 +114,12 @@ class FaceMatcher:
         6. Возвращаем MatchResult
         """
         query = np.asarray(embedding, dtype=np.float32)
+        
+        norm = np.linalg.norm(query)
+        if norm == 0:
+            return MatchResult(...)
+
+        query = query / norm
 
         if query.ndim != 1:
             raise ValueError("Query embedding must be 1D")
