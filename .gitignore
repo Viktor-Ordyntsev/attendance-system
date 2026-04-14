@@ -36,3 +36,6 @@ build/
 storage/
 snapshots/
 uploads/
+
+
+*.onnx

@@ -82,7 +82,7 @@ class RecognitionPipeline:
                 faces = self.detector.detect(frame)
 
                 for face in faces:
-                    embedding = self.recognizer.get_embedding(face)
+                    embedding = self.recognizer.get_embedding(frame, face)
                     match = self.matcher.match(embedding)
                     bbox = face.bbox
 

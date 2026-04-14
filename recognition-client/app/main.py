@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
+import os
 
 from app.core.camera import Camera
 from app.core.detector import FaceDetector
-from app.core.recognizer import InsightFaceRecognizer
+from app.core.recognizer import InsightFaceRecognizer, CustomFaceRecognizer
 from app.core.matcher import FaceMatcher
 from app.core.pipeline import RecognitionPipeline
 
@@ -36,7 +37,7 @@ def build_demo_reference_db(detector: FaceDetector, recognizer: InsightFaceRecog
             continue
 
         face = faces[0]
-        embedding = recognizer.get_embedding(face)
+        embedding = recognizer.get_embedding(image, face)
 
         reference_db.append(
             {
@@ -50,10 +51,14 @@ def build_demo_reference_db(detector: FaceDetector, recognizer: InsightFaceRecog
 
 
 def main() -> None:
-    camera = Camera(2)
+    camera_source = os.getenv("CAMERA_SOURCE", "0")
+    camera = Camera(camera_source)
     detector = FaceDetector()
-    recognizer = InsightFaceRecognizer()
-    matcher = FaceMatcher(threshold=0.45, min_margin=0.02)
+    recognizer = CustomFaceRecognizer(
+        model_path="./app/models/face_recognizer.onnx",
+        input_size=(112, 112),
+    )
+    matcher = FaceMatcher(threshold=0.60, min_margin=0.0085)
 
     reference_db = build_demo_reference_db(detector, recognizer)
     matcher.set_reference_db(reference_db)
