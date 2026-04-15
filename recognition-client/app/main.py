@@ -10,6 +10,7 @@ from app.core.detector import FaceDetector
 from app.core.recognizer import InsightFaceRecognizer, CustomFaceRecognizer
 from app.core.matcher import FaceMatcher
 from app.core.pipeline import RecognitionPipeline
+from app.gui import ClientWindow
 
 
 def build_demo_reference_db(detector: FaceDetector, recognizer: InsightFaceRecognizer) -> list[dict]:
@@ -75,7 +76,8 @@ def main() -> None:
         recognizer=recognizer,
         matcher=matcher,
     )
-    pipeline.run()
+    window = ClientWindow(pipeline=pipeline)
+    window.run()
 
 
 if __name__ == "__main__":
