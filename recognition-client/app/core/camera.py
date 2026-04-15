@@ -42,6 +42,7 @@ class Camera:
             cap = cv2.VideoCapture(source) if backend is None else cv2.VideoCapture(source, backend)
 
             if cap.isOpened():
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 self.cap = cap
                 self.source = source
                 return

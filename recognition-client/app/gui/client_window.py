@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 
 import cv2
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QThread, Qt, QObject, Signal, Slot
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -22,6 +22,51 @@ from PySide6.QtWidgets import (
 from app.core.pipeline import PipelineStatus, RecognitionPipeline
 
 
+class PipelineWorker(QObject):
+    frame_ready = Signal(QImage, object)
+    error = Signal(str)
+    finished = Signal()
+
+    def __init__(self, pipeline: RecognitionPipeline) -> None:
+        super().__init__()
+        self.pipeline = pipeline
+        self._running = False
+
+    @Slot()
+    def run(self) -> None:
+        self._running = True
+
+        try:
+            self.pipeline.camera.open()
+            while self._running:
+                frame = self.pipeline.camera.read()
+                processed_frame, status = self.pipeline.process_frame(frame)
+                image = self._to_qimage(processed_frame)
+                self.frame_ready.emit(image, status)
+                QThread.msleep(15)
+        except Exception as exc:
+            self.error.emit(str(exc))
+        finally:
+            self.pipeline.camera.release()
+            self.finished.emit()
+
+    def stop(self) -> None:
+        self._running = False
+
+    @staticmethod
+    def _to_qimage(frame) -> QImage:
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        height, width, channels = rgb_frame.shape
+        bytes_per_line = channels * width
+        return QImage(
+            rgb_frame.data,
+            width,
+            height,
+            bytes_per_line,
+            QImage.Format.Format_RGB888,
+        ).copy()
+
+
 class ClientWindow(QMainWindow):
     def __init__(self, pipeline: RecognitionPipeline, window_title: str = "Attendance Client") -> None:
         self.app = QApplication.instance()
@@ -35,10 +80,9 @@ class ClientWindow(QMainWindow):
         self.resize(1280, 760)
         self.setMinimumSize(1100, 680)
 
-        self.timer = QTimer(self)
-        self.timer.setInterval(15)
-        self.timer.timeout.connect(self._update_frame)
         self.is_running = False
+        self.worker_thread: QThread | None = None
+        self.worker: PipelineWorker | None = None
 
         self.video_label = QLabel("Camera preview will appear here")
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -53,6 +97,8 @@ class ClientWindow(QMainWindow):
         self.last_match_value = QLabel("unknown")
         self.confirmed_value = QLabel("-")
         self.reason_value = QLabel("idle")
+        self.provider_value = QLabel("unknown")
+        self.processing_value = QLabel("0.0 ms")
         self.events_list = QListWidget()
         self.events_list.setStyleSheet(
             "background:#f9f4ec; color:#2b2b2b; border:none; padding:6px; font: 11px 'Consolas';"
@@ -100,6 +146,8 @@ class ClientWindow(QMainWindow):
             ("Last match", self.last_match_value),
             ("Confirmed", self.confirmed_value),
             ("Reason", self.reason_value),
+            ("Provider", self.provider_value),
+            ("Latency", self.processing_value),
         ]
         for row_index, (title, value_label) in enumerate(rows):
             title_label = QLabel(title)
@@ -190,41 +238,44 @@ class ClientWindow(QMainWindow):
         if self.is_running:
             return
 
-        try:
-            self.pipeline.camera.open()
-        except Exception as exc:
-            self.camera_value.setText(f"Error: {exc}")
-            return
-
         self.camera_value.setText("Running")
         self.is_running = True
-        self.timer.start()
+        self.worker_thread = QThread(self)
+        self.worker = PipelineWorker(self.pipeline)
+        self.worker.moveToThread(self.worker_thread)
+        self.worker.frame_ready.connect(self._handle_frame)
+        self.worker.error.connect(self._handle_error)
+        self.worker.finished.connect(self._worker_finished)
+        self.worker_thread.started.connect(self.worker.run)
+        self.worker_thread.start()
 
     def stop(self) -> None:
-        self.timer.stop()
-        self.pipeline.camera.release()
+        if self.worker is not None:
+            self.worker.stop()
+        if self.worker_thread is not None:
+            self.worker_thread.quit()
+            self.worker_thread.wait(2000)
+            self.worker_thread = None
+        self.worker = None
         self.is_running = False
         self.camera_value.setText("Stopped")
 
-    def _update_frame(self) -> None:
-        if not self.is_running:
-            return
+    @Slot(QImage, object)
+    def _handle_frame(self, image: QImage, status: PipelineStatus) -> None:
+        self._render_image(image)
+        self._update_status(status)
+        self._update_events()
 
-        try:
-            frame = self.pipeline.camera.read()
-            processed_frame, status = self.pipeline.process_frame(frame)
-            self._render_frame(processed_frame)
-            self._update_status(status)
-            self._update_events()
-        except Exception as exc:
-            self.camera_value.setText(f"Error: {exc}")
-            self.stop()
+    @Slot(str)
+    def _handle_error(self, error_message: str) -> None:
+        self.camera_value.setText(f"Error: {error_message}")
+        self.stop()
 
-    def _render_frame(self, frame) -> None:
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        height, width, channels = rgb_frame.shape
-        bytes_per_line = channels * width
-        image = QImage(rgb_frame.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+    @Slot()
+    def _worker_finished(self) -> None:
+        self.is_running = False
+
+    def _render_image(self, image: QImage) -> None:
         pixmap = QPixmap.fromImage(image)
         scaled = pixmap.scaled(
             self.video_label.size(),
@@ -240,6 +291,8 @@ class ClientWindow(QMainWindow):
         self.last_match_value.setText(f"{status.last_match_label} ({status.last_match_score:.2f})")
         self.confirmed_value.setText(status.confirmed_label or "-")
         self.reason_value.setText(status.last_reason)
+        self.provider_value.setText(status.provider_name)
+        self.processing_value.setText(f"{status.processing_ms:.1f} ms")
 
     def _update_events(self) -> None:
         self.events_list.clear()
@@ -248,6 +301,7 @@ class ClientWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         self.stop()
+        self.pipeline.shutdown()
         super().closeEvent(event)
 
     def run(self) -> None:

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from pathlib import Path
+import os
 
 import cv2
 import numpy as np
@@ -26,10 +26,31 @@ class CustomFaceRecognizer(BaseFaceRecognizer):
         input_size: tuple[int, int] = (112, 112),
         providers: list[str] | None = None,
     ) -> None:
-        providers = providers or ["CPUExecutionProvider"]
-        self.session = ort.InferenceSession(model_path, providers=providers)
+        self.providers = self._resolve_providers(providers)
+        self.session = ort.InferenceSession(model_path, providers=self.providers)
         self.input_name = self.session.get_inputs()[0].name
         self.input_size = input_size
+        self.active_providers = self.session.get_providers()
+
+    @staticmethod
+    def _resolve_providers(providers: list[str] | None) -> list[str]:
+        if providers is not None:
+            return providers
+
+        available = set(ort.get_available_providers())
+        preferred_env = os.getenv("ORT_PROVIDERS")
+        if preferred_env:
+            requested = [item.strip() for item in preferred_env.split(",") if item.strip()]
+            resolved = [provider for provider in requested if provider in available]
+            if resolved:
+                return resolved
+
+        preferred_order = [
+            "CUDAExecutionProvider",
+            "DmlExecutionProvider",
+            "CPUExecutionProvider",
+        ]
+        return [provider for provider in preferred_order if provider in available]
 
     def get_embedding(self, frame: np.ndarray, face) -> np.ndarray:
         crop = self._extract_face(frame, face)

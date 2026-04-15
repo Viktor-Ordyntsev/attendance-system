@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import cv2
 import os
+import onnxruntime as ort
+from pathlib import Path
 
 from app.core.camera import Camera
 from app.core.detector import FaceDetector
@@ -11,6 +13,23 @@ from app.core.recognizer import InsightFaceRecognizer, CustomFaceRecognizer
 from app.core.matcher import FaceMatcher
 from app.core.pipeline import RecognitionPipeline
 from app.gui import ClientWindow
+
+
+def load_env_file(env_path: str = ".env") -> None:
+    path = Path(env_path)
+    if not path.exists():
+        return
+
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
 
 
 def build_demo_reference_db(detector: FaceDetector, recognizer: InsightFaceRecognizer) -> list[dict]:
@@ -51,7 +70,9 @@ def build_demo_reference_db(detector: FaceDetector, recognizer: InsightFaceRecog
 
 
 def main() -> None:
+    load_env_file()
     camera_source = os.getenv("CAMERA_SOURCE", "0")
+    print("ONNX Runtime providers:", ort.get_available_providers())
     camera = Camera(camera_source)
     detector = FaceDetector(
         model_path=os.getenv("SCRFD_MODEL_PATH"),
@@ -65,7 +86,9 @@ def main() -> None:
         model_path="./app/models/face_recognizer.onnx",
         input_size=(112, 112),
     )
-    matcher = FaceMatcher(threshold=0.60, min_margin=0.0085)
+    print("Requested recognizer providers:", recognizer.providers)
+    print("Active recognizer providers:", recognizer.active_providers)
+    matcher = FaceMatcher(threshold=0.75, min_margin=0.005)
 
     reference_db = build_demo_reference_db(detector, recognizer)
     matcher.set_reference_db(reference_db)
@@ -75,6 +98,8 @@ def main() -> None:
         detector=detector,
         recognizer=recognizer,
         matcher=matcher,
+        frame_skip=int(os.getenv("FRAME_SKIP", "2")),
+        max_recognition_faces=int(os.getenv("MAX_RECOGNITION_FACES", "5")),
     )
     window = ClientWindow(pipeline=pipeline)
     window.run()
