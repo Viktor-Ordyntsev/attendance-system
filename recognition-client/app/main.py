@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import cv2
-import numpy as np
 import os
 
 from app.core.camera import Camera
@@ -53,7 +52,14 @@ def build_demo_reference_db(detector: FaceDetector, recognizer: InsightFaceRecog
 def main() -> None:
     camera_source = os.getenv("CAMERA_SOURCE", "0")
     camera = Camera(camera_source)
-    detector = FaceDetector()
+    detector = FaceDetector(
+        model_path=os.getenv("SCRFD_MODEL_PATH"),
+        det_size=(640, 640),
+        threshold=0.55,
+        max_faces=50,
+        min_face_size=60,
+        ctx_id=int(os.getenv("FACE_DETECTOR_CTX_ID", "-1")),
+    )
     recognizer = CustomFaceRecognizer(
         model_path="./app/models/face_recognizer.onnx",
         input_size=(112, 112),
